@@ -8,7 +8,7 @@ such as publishing to a Notifications topic, a Streaming stream or invoking a Fu
 
 ```hcl
 module "events_rule" {
-  source = "github.com/cybercapybara/terraform-oci-events"
+  source = "github.com/moveeeax/terraform-oci-events"
 
   compartment_id = var.compartment_id
   display_name   = "prod-instance-events"
