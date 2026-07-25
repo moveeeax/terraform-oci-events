@@ -1,11 +1,21 @@
 variable "compartment_id" {
-  description = "OCID of the compartment in which to create the events rule."
+  description = "OCID of the compartment in which to create the events rule. The rule matches events emitted in this compartment and all of its children."
   type        = string
+
+  validation {
+    condition     = can(regex("^ocid1\\.(compartment|tenancy)\\.", var.compartment_id))
+    error_message = "compartment_id must be a compartment or tenancy OCID (starting with \"ocid1.compartment.\" or \"ocid1.tenancy.\")."
+  }
 }
 
 variable "display_name" {
   description = "Human-readable name for the rule."
   type        = string
+
+  validation {
+    condition     = length(trimspace(var.display_name)) > 0 && length(var.display_name) <= 255
+    error_message = "display_name must be a non-blank string of at most 255 characters."
+  }
 }
 
 variable "description" {
@@ -15,18 +25,57 @@ variable "description" {
 }
 
 variable "is_enabled" {
-  description = "Whether the rule is enabled."
+  description = "Whether the rule is enabled. A disabled rule is created but never evaluates events."
   type        = bool
   default     = true
 }
 
 variable "condition" {
-  description = "JSON condition matched against incoming events (eventType, source, and data filters)."
+  description = <<-EOT
+    JSON condition matched against incoming events (eventType, source and data filters).
+    Build it with `jsonencode` rather than hand-writing an escaped string. OCI stores the
+    condition verbatim and does not verify that the event types in it actually exist, so a
+    typo produces a rule that is enabled and never fires. `jsonencode({})` matches every
+    event in the compartment subtree.
+  EOT
   type        = string
+
+  validation {
+    condition     = can(jsondecode(var.condition))
+    error_message = "condition must be valid JSON. Build it with jsonencode({ eventType = [...] }) instead of a hand-escaped string."
+  }
+
+  validation {
+    condition     = can(keys(jsondecode(var.condition)))
+    error_message = "condition must decode to a JSON object such as {\"eventType\": [...]}, not an array, string or number. OCI accepts other shapes but they match no events."
+  }
+
+  # An `eventType` key must be a non-empty array. `eventType: []` is accepted by OCI and
+  # silently matches nothing, which is the classic "rule exists, is enabled, never fires".
+  validation {
+    condition = (
+      !can(jsondecode(var.condition).eventType) ||
+      (can(tolist(jsondecode(var.condition).eventType)) && length(try(tolist(jsondecode(var.condition).eventType), [])) > 0)
+    )
+    error_message = "condition.eventType must be a non-empty JSON array of event type strings. An empty array matches no events, so the rule would never fire."
+  }
+
+  # OCI Events only ever delivers events emitted by OCI services, which are all named
+  # com.oraclecloud.<service>.<operation>[.<phase>]. Anything else can never match.
+  validation {
+    condition = alltrue([
+      for e in try(tolist(jsondecode(var.condition).eventType), []) :
+      can(regex("^com\\.oraclecloud\\.[^\\s]+$", e))
+    ])
+    error_message = "Every condition.eventType entry must look like \"com.oraclecloud.<service>.<operation>\" with no whitespace (the asterisk wildcard is allowed). OCI never emits event types with any other prefix, so such an entry would never match."
+  }
 }
 
 variable "actions" {
-  description = "List of actions to trigger when the rule matches."
+  description = <<-EOT
+    Actions to trigger when the rule matches. Each action must set exactly the target OCID
+    that matches its action_type: ONS -> topic_id, OSS -> stream_id, FAAS -> function_id.
+  EOT
   type = list(object({
     action_type = string
     is_enabled  = optional(bool, true)
@@ -46,6 +95,38 @@ variable "actions" {
       for a in var.actions : contains(["ONS", "OSS", "FAAS"], a.action_type)
     ])
     error_message = "action_type must be ONS, OSS, or FAAS."
+  }
+
+  # Without this, an action carrying no target OCID (or an empty string, which the OCI
+  # provider treats as unset) produces a rule that matches events and delivers nowhere.
+  validation {
+    condition = alltrue([
+      for a in var.actions : (
+        a.action_type == "ONS" ? try(length(trimspace(a.topic_id)), 0) > 0 :
+        a.action_type == "OSS" ? try(length(trimspace(a.stream_id)), 0) > 0 :
+        a.action_type == "FAAS" ? try(length(trimspace(a.function_id)), 0) > 0 :
+        true
+      )
+    ])
+    error_message = "Each action must set a non-empty target OCID for its action_type: ONS requires topic_id, OSS requires stream_id, FAAS requires function_id."
+  }
+
+  # A target OCID that does not belong to the action_type is ignored by the Events service,
+  # so e.g. an ONS action carrying only function_id would deliver nothing.
+  validation {
+    condition = alltrue([
+      for a in var.actions : length(compact([
+        try(trimspace(a.topic_id), ""),
+        try(trimspace(a.stream_id), ""),
+        try(trimspace(a.function_id), ""),
+      ])) <= 1
+    ])
+    error_message = "Each action must set exactly one target OCID. Setting a target that does not match action_type (for example function_id on an ONS action) is silently ignored by OCI."
+  }
+
+  validation {
+    condition     = anytrue([for a in var.actions : a.is_enabled])
+    error_message = "At least one action must have is_enabled = true; a rule whose actions are all disabled matches events but delivers nothing."
   }
 }
 

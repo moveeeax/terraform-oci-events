@@ -6,15 +6,17 @@ resource "oci_events_rule" "this" {
   condition      = var.condition
 
   actions {
-    dynamic "actions" {
+    # The provider also accepts a nested block literally named "actions", but it is
+    # deprecated in favour of "action" and emits a warning on every plan.
+    dynamic "action" {
       for_each = var.actions
       content {
-        action_type = actions.value.action_type
-        is_enabled  = actions.value.is_enabled
-        description = actions.value.description
-        topic_id    = actions.value.topic_id
-        stream_id   = actions.value.stream_id
-        function_id = actions.value.function_id
+        action_type = action.value.action_type
+        is_enabled  = action.value.is_enabled
+        description = action.value.description
+        topic_id    = action.value.topic_id
+        stream_id   = action.value.stream_id
+        function_id = action.value.function_id
       }
     }
   }
