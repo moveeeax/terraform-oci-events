@@ -29,3 +29,32 @@ jobs:
         run: |
           tofu init -backend=false
           tofu validate
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.64.0
+
+      - name: tflint
+        run: tflint --recursive
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `terraform test` with mock_provider needs >= 1.7 and runs without OCI credentials.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+          terraform_wrapper: false
+
+      - name: init
+        run: terraform init -backend=false
+
+      - name: test
+        run: terraform test
