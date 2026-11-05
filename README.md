@@ -12,7 +12,7 @@ delivers anything. See [Rules that never fire](#rules-that-never-fire).
 
 ```hcl
 module "events_rule" {
-  source = "github.com/moveeeax/terraform-oci-events"
+  source = "github.com/moveeeax/terraform-oci-events?ref=v1.0.0"
 
   compartment_id = var.compartment_id
   display_name   = "prod-instance-events"
