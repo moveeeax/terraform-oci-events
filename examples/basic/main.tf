@@ -19,6 +19,10 @@ module "events_rule" {
     }
   ]
 
+  # Let the Events service publish to the topic; without an IAM policy for the
+  # cloudEvents service principal the rule fires and delivers nothing.
+  create_service_policy = true
+
   freeform_tags = {
     Environment = "sandbox"
     ManagedBy   = "terraform"

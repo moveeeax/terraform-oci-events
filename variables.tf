@@ -130,6 +130,34 @@ variable "actions" {
   }
 }
 
+variable "create_service_policy" {
+  description = "Create an IAM policy that lets the Events service (service principal cloudEvents) deliver to the targets of the rule's action types. Without such a policy, created here or elsewhere, the rule matches events and every delivery is refused. Default false: no policy is created."
+  type        = bool
+  default     = false
+}
+
+variable "service_policy_compartment_id" {
+  description = "OCID of the compartment that holds the action targets (topics, streams, functions). The policy is created in this compartment and grants access in it and its children; a tenancy OCID grants access in the whole tenancy. Null uses compartment_id. Ignored unless create_service_policy is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.service_policy_compartment_id == null || can(regex("^ocid1\\.(compartment|tenancy)\\.", var.service_policy_compartment_id))
+    error_message = "service_policy_compartment_id must be a compartment or tenancy OCID (starting with \"ocid1.compartment.\" or \"ocid1.tenancy.\") or null."
+  }
+}
+
+variable "service_policy_name" {
+  description = "Name of the service policy. IAM policy names are unique per tenancy. Null uses \"<display_name>-events-delivery\", with characters other than letters, digits, _, . and - replaced by -. Ignored unless create_service_policy is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.service_policy_name == null || try(length(trimspace(var.service_policy_name)) > 0, false)
+    error_message = "service_policy_name must not be blank; leave it null to use the default name."
+  }
+}
+
 variable "freeform_tags" {
   description = "Free-form tags applied to the rule."
   type        = map(string)
