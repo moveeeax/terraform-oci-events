@@ -261,3 +261,133 @@ run "rejects_blank_display_name" {
 
   expect_failures = [var.display_name]
 }
+
+# --- service policy for delivery -------------------------------------------
+
+run "no_service_policy_by_default" {
+  assert {
+    condition     = length(oci_identity_policy.service) == 0
+    error_message = "No IAM policy may be created unless create_service_policy is true."
+  }
+
+  assert {
+    condition     = output.service_policy_id == null
+    error_message = "service_policy_id must be null when no policy is created."
+  }
+
+  assert {
+    condition     = length(output.service_policy_statements) == 0
+    error_message = "service_policy_statements must be empty when no policy is created."
+  }
+}
+
+run "service_policy_for_ons_grants_topic_publish_only" {
+  variables {
+    display_name          = "test instance events"
+    create_service_policy = true
+  }
+
+  assert {
+    condition = oci_identity_policy.service[0].statements == tolist([
+      "Allow service cloudEvents to use ons-topics in compartment id ocid1.compartment.oc1..aaaaaaaaexamplecompartment",
+    ])
+    error_message = "An ONS-only rule must get exactly the ons-topics statement, scoped to the rule's compartment."
+  }
+
+  assert {
+    condition     = oci_identity_policy.service[0].compartment_id == var.compartment_id
+    error_message = "The policy must default to the rule's compartment."
+  }
+
+  assert {
+    condition     = oci_identity_policy.service[0].name == "test-instance-events-events-delivery"
+    error_message = "The default policy name must be the sanitised display_name plus -events-delivery."
+  }
+
+  assert {
+    condition     = output.service_policy_id == oci_identity_policy.service[0].id
+    error_message = "service_policy_id must expose the policy OCID."
+  }
+}
+
+run "service_policy_covers_every_action_type_once" {
+  variables {
+    create_service_policy         = true
+    service_policy_compartment_id = "ocid1.compartment.oc1..aaaaaaaatargetcompartment"
+    service_policy_name           = "events-delivery"
+    actions = [
+      {
+        action_type = "FAAS"
+        function_id = "ocid1.fnfunc.oc1..aaaaaaaaexamplefunction"
+      },
+      {
+        action_type = "OSS"
+        stream_id   = "ocid1.stream.oc1..aaaaaaaaexamplestream"
+      },
+      {
+        action_type = "ONS"
+        topic_id    = "ocid1.onstopic.oc1..aaaaaaaaexampletopic"
+      },
+      {
+        action_type = "ONS"
+        topic_id    = "ocid1.onstopic.oc1..aaaaaaaaexampletopic2"
+      },
+    ]
+  }
+
+  assert {
+    condition = oci_identity_policy.service[0].statements == tolist([
+      "Allow service cloudEvents to use fn-invocation in compartment id ocid1.compartment.oc1..aaaaaaaatargetcompartment",
+      "Allow service cloudEvents to use ons-topics in compartment id ocid1.compartment.oc1..aaaaaaaatargetcompartment",
+      "Allow service cloudEvents to use stream-push in compartment id ocid1.compartment.oc1..aaaaaaaatargetcompartment",
+      "Allow service cloudEvents to read streams in compartment id ocid1.compartment.oc1..aaaaaaaatargetcompartment",
+    ])
+    error_message = "Each action type present must add its statements exactly once, scoped to service_policy_compartment_id."
+  }
+
+  assert {
+    condition     = oci_identity_policy.service[0].compartment_id == "ocid1.compartment.oc1..aaaaaaaatargetcompartment"
+    error_message = "The policy must be created in service_policy_compartment_id."
+  }
+
+  assert {
+    condition     = oci_identity_policy.service[0].name == "events-delivery"
+    error_message = "service_policy_name must override the default name."
+  }
+}
+
+run "service_policy_in_root_compartment_uses_tenancy_scope" {
+  variables {
+    create_service_policy         = true
+    service_policy_compartment_id = "ocid1.tenancy.oc1..aaaaaaaaexampletenancy"
+  }
+
+  assert {
+    condition = oci_identity_policy.service[0].statements == tolist([
+      "Allow service cloudEvents to use ons-topics in tenancy",
+    ])
+    error_message = "A tenancy OCID must produce an 'in tenancy' statement."
+  }
+}
+
+run "rejects_non_compartment_service_policy_compartment" {
+  command = plan
+
+  variables {
+    create_service_policy         = true
+    service_policy_compartment_id = "ocid1.onstopic.oc1..aaaaaaaaexampletopic"
+  }
+
+  expect_failures = [var.service_policy_compartment_id]
+}
+
+run "rejects_blank_service_policy_name" {
+  command = plan
+
+  variables {
+    create_service_policy = true
+    service_policy_name   = " "
+  }
+
+  expect_failures = [var.service_policy_name]
+}

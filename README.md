@@ -28,6 +28,9 @@ module "events_rule" {
     }
   ]
 
+  # IAM policy that lets the Events service publish to the topic.
+  create_service_policy = true
+
   freeform_tags = {
     Environment = "production"
     ManagedBy   = "terraform"
@@ -71,6 +74,43 @@ Two things that look wrong but are not, and are therefore accepted:
 Note also that a rule matches events from its own compartment **and all child
 compartments**, so `compartment_id` should be the root of the subtree you want to watch.
 
+## Service policy for delivery
+
+The Events service delivers to topics, streams and functions as the service
+principal `cloudEvents`, and IAM has to allow it. Without a policy the rule matches
+events and every delivery is refused, with nothing in Terraform to show for it.
+
+`create_service_policy = true` creates that policy (`oci_identity_policy`) with
+statements only for the action types the rule uses:
+
+| `action_type` | Statement | Permission it carries |
+|---------------|-----------|-----------------------|
+| `ONS`  | `Allow service cloudEvents to use ons-topics in <scope>` | `ONS_TOPIC_PUBLISH` |
+| `OSS`  | `Allow service cloudEvents to use stream-push in <scope>` and `... to read streams in <scope>` | `STREAM_PRODUCE`, `STREAM_READ` |
+| `FAAS` | `Allow service cloudEvents to use fn-invocation in <scope>` | `FN_INVOCATION` |
+
+The permissions are the ones Oracle lists for Events delivery in
+[Events policies](https://docs.oracle.com/en-us/iaas/Content/Events/Concepts/eventspolicy.htm)
+(cross-tenancy section); the verbs and resource types are the narrowest that carry
+them per the IAM references for
+[Notifications](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/notificationpolicyreference.htm),
+[Streaming](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/streamingpolicyreference.htm) and
+[Functions](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/functionspolicyreference.htm).
+`use ons-topics` also includes `ONS_TOPIC_SUBSCRIBE`; there is no narrower verb.
+Many published examples grant `use functions-family` instead, which also covers
+applications and function reads; this module does not.
+
+`<scope>` is `compartment id <service_policy_compartment_id>`, which defaults to
+`compartment_id`. Set `service_policy_compartment_id` to the compartment holding
+the targets when they live elsewhere; the policy is created there and covers its
+child compartments. A tenancy OCID yields `in tenancy`. Creating the policy needs
+permission to manage policies in that compartment, and the policy name
+(`service_policy_name`, default `<display_name>-events-delivery`) must be unique in
+the tenancy.
+
+The policy is off by default, so existing configurations that grant the access
+elsewhere are unaffected.
+
 ## Requirements
 
 | Name      | Version  |
@@ -93,6 +133,9 @@ Running the test suite additionally requires Terraform or OpenTofu >= 1.7 for
 | `actions`        | List of actions (ONS/OSS/FAAS) to trigger on match. Each must set exactly the target OCID matching its `action_type`. | `list(object(...))` | n/a     |   yes    |
 | `freeform_tags`  | Free-form tags applied to the rule.                              | `map(string)`       | `{}`    |    no    |
 | `defined_tags`   | Defined tags applied to the rule, keyed `namespace.key`.          | `map(string)`       | `{}`    |    no    |
+| `create_service_policy` | Create the IAM policy that lets the Events service deliver to the action targets. | `bool` | `false` | no |
+| `service_policy_compartment_id` | Compartment (or tenancy) OCID holding the targets; the policy is created and scoped there. Null uses `compartment_id`. | `string` | `null` | no |
+| `service_policy_name` | Policy name, unique in the tenancy. Null uses `<display_name>-events-delivery`. | `string` | `null` | no |
 
 ### `actions` object
 
@@ -113,6 +156,8 @@ Running the test suite additionally requires Terraform or OpenTofu >= 1.7 for
 | `display_name` | Display name of the rule.       |
 | `is_enabled`   | Whether the rule is enabled.    |
 | `state`        | Lifecycle state of the rule.    |
+| `service_policy_id` | OCID of the delivery policy; null when `create_service_policy` is false. |
+| `service_policy_statements` | Statements of the delivery policy; empty when it is not created. |
 
 ## Testing
 
